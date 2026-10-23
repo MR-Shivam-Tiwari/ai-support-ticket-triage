@@ -1,0 +1,211 @@
+{
+  "name": "AI Support Ticket Triage & Draft Reply",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-ticket",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "fd37f7e6-be48-47b4-b03a-c204789dd7c4",
+      "name": "Ticket Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"You are a support triage assistant. Reply with JSON only: {category: 'billing'|'technical'|'account'|'general', sentiment: 'positive'|'neutral'|'negative', priority: 'low'|'medium'|'high'|'urgent', summary: string, draft_reply: string}. Priority is urgent only for outages, data loss, security or payment failures affecting use.\" },\n    { \"role\": \"user\", \"content\": \"From: {{ $json.body.from }}\\nSubject: {{ $json.body.subject }}\\n\\n{{ $json.body.message }}\" }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fc7d7cb2-3d73-4f06-b058-b93638aa3cbb",
+      "name": "AI Classify Ticket (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\nconst ai = JSON.parse(raw);\nconst t = $('Ticket Webhook').first().json.body;\nreturn [{ json: { from: t.from, subject: t.subject, message: t.message, ...ai, received_at: new Date().toISOString() } }];"
+      },
+      "id": "7dc5284c-5b0a-4b98-8d1e-37a2db10c3f7",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c25bd17b-7220-4e4f-9289-4bedaedbed64",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "urgent",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f5d8f51f-e3e3-4ecd-b61e-8bc10fb5a243",
+      "name": "Urgent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "post",
+        "channel": "#support-urgent",
+        "text": "=URGENT ticket from {{ $json.from }}: {{ $json.subject }} - {{ $json.summary }}",
+        "options": {}
+      },
+      "id": "addb20ad-b523-459d-a0d7-3bb47b710fe4",
+      "name": "Slack Alert - Urgent Ticket",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "options": {}
+      },
+      "id": "b397c05b-0a57-4d01-b9c7-b2b882aa0420",
+      "name": "Log Ticket to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "draft",
+        "options": {}
+      },
+      "id": "5bb5de62-6958-407c-8510-042110a3893d",
+      "name": "Create Draft Reply (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1340,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Ticket Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Classify Ticket (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Classify Ticket (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Parse Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Triage": {
+      "main": [
+        [
+          {
+            "node": "Urgent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urgent?": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert - Urgent Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Ticket to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Alert - Urgent Ticket": {
+      "main": [
+        [
+          {
+            "node": "Create Draft Reply (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Ticket to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Create Draft Reply (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null
+}
